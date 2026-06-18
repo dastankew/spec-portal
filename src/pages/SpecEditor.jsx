@@ -173,28 +173,52 @@ export default function SpecEditor() {
       // Читаем как массивы и находим строку-заголовок среди первых 15 строк
       const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
       const HEADER_WORDS = ['наимен', 'назван', 'name', 'описание', 'номенклатур']
-      let headerIdx = 0
+      let headerIdx = -1
       for (let i = 0; i < Math.min(15, raw.length); i++) {
         const row = raw[i]
         const nonEmpty = row.filter((c) => String(c).trim()).length
         const hasKeyword = row.some((cell) => HEADER_WORDS.some((w) => String(cell).toLowerCase().includes(w)))
         if (nonEmpty >= 2 && hasKeyword) { headerIdx = i; break }
       }
-      const headers = raw[headerIdx].map((h) => String(h).trim())
-      const dataRows = raw.slice(headerIdx + 1)
 
-      const findCol = (...words) => {
-        const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
-        return idx >= 0 ? idx : null
+      let iName, iUnit, iQty, iPrice, iPriceV, dataRows
+
+      if (headerIdx >= 0) {
+        const headers = raw[headerIdx].map((h) => String(h).trim())
+        dataRows = raw.slice(headerIdx + 1)
+        const findCol = (...words) => {
+          const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
+          return idx >= 0 ? idx : null
+        }
+        iName   = findCol('наимен', 'назван', 'name', 'описание', 'номенклатур')
+        iUnit   = findCol('ед', 'единиц', 'unit')
+        iQty    = findCol('кол', 'объём', 'qty', 'количество', 'объем')
+        iPrice  = findCol('стоимость ед', 'цена без', 'без ндс', 'цена', 'price_no', 'стоим')
+        iPriceV = findCol('с ндс', 'цена_с', 'price_vat')
+      } else {
+        // Нет строки заголовков — определяем колонки по содержимому
+        const sample = raw.slice(0, Math.min(20, raw.length)).filter(r => r.filter(c => String(c).trim()).length >= 3)
+        if (!sample.length) { setError('Не удалось определить структуру файла'); setImporting(false); return }
+        const numCols = Math.max(...sample.map(r => r.length))
+        const cols = Array.from({ length: numCols }, (_, c) => c)
+        const cellStr   = (r, c) => String(r[c] ?? '').trim()
+        const avgLen    = (c) => sample.reduce((s, r) => s + cellStr(r, c).length, 0) / sample.length
+        const avgVal    = (c) => sample.reduce((s, r) => s + Number(cellStr(r, c)), 0) / sample.length
+        const isNumCol  = (c) => sample.every(r => { const v = Number(cellStr(r, c)); return cellStr(r, c) !== '' && !isNaN(v) && v > 0 })
+        const isCodeCol = (c) => sample.filter(r => /^\d{3}-\d{3}/.test(cellStr(r, c))).length >= sample.length * 0.5
+        const isUnitCol = (c) => sample.every(r => { const v = cellStr(r, c); return v.length <= 15 && /[а-яёa-z²³]/i.test(v) })
+        const iCode     = cols.find(isCodeCol) ?? null
+        iName           = cols.reduce((best, c) => avgLen(c) > avgLen(best) ? c : best, 0)
+        iUnit           = cols.find(c => c !== iName && c !== iCode && isUnitCol(c)) ?? null
+        const numCols2  = cols.filter(c => c !== iName && c !== iCode && c !== iUnit && isNumCol(c)).sort((a, b) => avgVal(b) - avgVal(a))
+        iPrice          = numCols2[0] ?? null
+        iPriceV         = null  // в КП без заголовков вторая числовая = цена с НДС, но нет qty
+        iQty            = null  // кол-во не всегда есть
+        dataRows        = raw
       }
-      const iName   = findCol('наимен', 'назван', 'name', 'описание', 'номенклатур')
-      const iUnit   = findCol('ед', 'единиц', 'unit')
-      const iQty    = findCol('кол', 'объём', 'qty', 'количество', 'объем')
-      const iPrice  = findCol('стоимость ед', 'цена без', 'без ндс', 'цена', 'price_no', 'стоим')
-      const iPriceV = findCol('с ндс', 'цена_с', 'price_vat')
 
       if (iName === null) {
-        setError(`Не найдена колонка с наименованием. Найденные заголовки: ${headers.filter(Boolean).join(' | ')}`)
+        setError('Не удалось определить колонку с наименованием. Проверьте формат файла.')
         setImporting(false); return
       }
 
