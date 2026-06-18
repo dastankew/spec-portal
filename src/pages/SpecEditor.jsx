@@ -74,13 +74,27 @@ export default function SpecEditor() {
     return data || []
   }, [catLoaded, catalog])
 
-  // ── Поиск по каталогу ─────────────────────────────────────────────────────
+  // ── Поиск по каталогу (точный + нечёткий по словам) ──────────────────────
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (q.length < 2 || !catLoaded) return []
-    return catalog
-      .filter((r) => r.name.toLowerCase().includes(q) || (r.code || '').toLowerCase().includes(q))
-      .slice(0, 10)
+
+    const words = q.split(/\s+/).filter((w) => w.length > 2)
+
+    const scored = catalog.map((r) => {
+      const hay = r.name.toLowerCase()
+      const code = (r.code || '').toLowerCase()
+      let sc = 0
+      if (hay.includes(q) || code.includes(q)) sc += 100        // точное вхождение
+      words.forEach((w) => { if (hay.includes(w)) sc += 20 })   // слово в названии
+      return { item: r, sc }
+    }).filter((x) => x.sc > 0)
+      .sort((a, b) => b.sc - a.sc)
+
+    const exact   = scored.filter((x) => x.sc >= 100).slice(0, 8).map((x) => ({ ...x.item, _analog: false }))
+    const analogs = scored.filter((x) => x.sc < 100 && x.sc > 0).slice(0, exact.length < 3 ? 5 : 0).map((x) => ({ ...x.item, _analog: true }))
+
+    return [...exact, ...analogs]
   }, [search, catalog, catLoaded])
 
   const onSearchFocus = () => { if (!catLoaded) loadCatalog().catch(() => {}) }
@@ -255,8 +269,7 @@ export default function SpecEditor() {
           JSON.parse(jsonPart[0]).forEach(({ idx, id }) => { matchMap[idx] = id || null })
         }
       } catch (aiErr) {
-        // ИИ недоступен — всё уйдёт в «не найдено»
-        console.warn('AI matching failed:', aiErr)
+        setMatchInfo(`⚠️ ИИ-сопоставление не сработало (${aiErr.message}). Все строки добавлены без сопоставления — проверьте VITE_ANTHROPIC_KEY в настройках Vercel.`)
       }
 
       // ── Применить результаты ─────────────────────────────────────────────
@@ -535,10 +548,15 @@ export default function SpecEditor() {
                       onMouseEnter={(e) => e.currentTarget.style.background = C.actionSoft}
                       onMouseLeave={(e) => e.currentTarget.style.background = ''}
                     >
-                      <div style={{ fontWeight: 600 }}>{item.name}</div>
+                      <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        {item.name}
+                        {item._analog && (
+                          <span style={{ fontSize: 10, fontWeight: 700, color: C.warning, background: C.warningSoft, borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>аналог</span>
+                        )}
+                      </div>
                       <div style={{ color: C.muted, fontSize: 12, marginTop: 2, display: 'flex', gap: 12 }}>
                         {item.unit && <span>{item.unit}</span>}
-                        {item.price != null && <span>{money(item.price)} без НДС</span>}
+                        {item.price != null && <span style={{ color: C.success, fontWeight: 600 }}>{money(item.price)} без НДС</span>}
                         {item.category && <span style={{ color: C.brand }}>{item.category}</span>}
                       </div>
                     </div>
