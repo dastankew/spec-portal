@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../supabase.js'
 import { C, FONT, MONO, money } from '../constants.js'
+import { callAI } from '../ai.js'
 import * as XLSX from 'xlsx'
 
 export default function SpecEditor() {
@@ -27,6 +28,8 @@ export default function SpecEditor() {
   const [loading, setLoading]     = useState(!isNew)
   const [saving, setSaving]       = useState(false)
   const [importing, setImporting] = useState(false)
+  const [aiMatching, setAiMatching] = useState(false)
+  const [aiProgress, setAiProgress] = useState('')
   const [error, setError]         = useState('')
   const [saved, setSaved]         = useState(false)
   const [matchInfo, setMatchInfo] = useState('')
@@ -141,7 +144,7 @@ export default function SpecEditor() {
   const totalNoVat = useMemo(() => lines.reduce((s, l) => s + (Number(l.sum)     || 0), 0), [lines])
   const totalVat   = useMemo(() => lines.reduce((s, l) => s + (Number(l.sum_vat) || 0), 0), [lines])
 
-  // ── Импорт Excel спецификации ─────────────────────────────────────────────
+  // ── Импорт Excel + ИИ-сопоставление ──────────────────────────────────────
   const handleExcelImport = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
@@ -164,70 +167,136 @@ export default function SpecEditor() {
 
       if (!colName) { setError('Не найдена колонка с наименованием'); setImporting(false); return }
 
-      // Нормализация строки для нечёткого поиска
-      const norm = (s) => s.toLowerCase().replace(/[^а-яёa-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
-
-      let matched = 0, manual = 0
-
-      const newLines = rows
+      // Распарсить строки из Excel
+      const specRows = rows
         .map((r) => {
           const name = String(r[colName] || '').trim()
           if (!name) return null
-
-          const qty      = Number(String(r[colQty]   || '').replace(/[^\d.]/g, '')) || 1
-          const price    = Number(String(r[colPrice]  || '').replace(/[^\d.]/g, '')) || null
-          const priceVat = Number(String(r[colPriceV] || '').replace(/[^\d.]/g, '')) || null
-          const unit     = colUnit ? String(r[colUnit] || '').trim() : ''
-
-          // Ищем совпадение в каталоге
-          const needle = norm(name)
-          let found = cat.find((c) => norm(c.name) === needle)
-          if (!found) found = cat.find((c) => norm(c.name).includes(needle.slice(0, 20)))
-          if (!found) found = cat.find((c) => needle.includes(norm(c.name).slice(0, 20)))
-
-          if (found) {
-            matched++
-            const p  = found.price    || price    || 0
-            const pv = found.price_vat || priceVat || Math.round(p * 1.16 * 100) / 100
-            return {
-              _key:          Date.now() + Math.random(),
-              price_item_id: found.id,
-              name:          found.name,
-              unit:          found.unit || unit,
-              qty,
-              price:         p,
-              price_vat:     pv,
-              sum:           qty * p,
-              sum_vat:       qty * pv,
-              manual:        false,
-            }
-          }
-
-          // Не нашли — добавляем как ручную строку с ценой из файла
-          manual++
-          const p  = price    || 0
-          const pv = priceVat || Math.round(p * 1.16 * 100) / 100
           return {
-            _key:          Date.now() + Math.random(),
-            price_item_id: null,
             name,
-            unit,
-            qty,
-            price:         p || null,
-            price_vat:     pv || null,
-            sum:           qty * p,
-            sum_vat:       qty * pv,
-            manual:        true,
+            qty:      Number(String(r[colQty]    || '').replace(/[^\d.]/g, '')) || 1,
+            price:    Number(String(r[colPrice]   || '').replace(/[^\d.]/g, '')) || null,
+            priceVat: Number(String(r[colPriceV]  || '').replace(/[^\d.]/g, '')) || null,
+            unit:     colUnit ? String(r[colUnit] || '').trim() : '',
           }
         })
         .filter(Boolean)
 
+      if (!specRows.length) { setError('Нет строк для импорта'); setImporting(false); return }
+
+      setImporting(false)
+      setAiMatching(true)
+      setAiProgress(`Анализирую ${specRows.length} строк...`)
+
+      // ── Для каждой строки найти топ-5 кандидатов по тексту ───────────
+      const norm = (s) => s.toLowerCase().replace(/[^а-яёa-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
+
+      const specWithCandidates = specRows.map((row, idx) => {
+        const needle = norm(row.name)
+        const words  = needle.split(' ').filter((w) => w.length > 2)
+        const scored = cat
+          .map((item) => {
+            const hay = norm(item.name)
+            let sc = 0
+            if (hay === needle) sc += 100
+            if (hay.includes(needle.slice(0, 18))) sc += 60
+            if (needle.includes(hay.slice(0, 18))) sc += 50
+            words.forEach((w) => { if (hay.includes(w)) sc += 15 })
+            return { item, sc }
+          })
+          .filter((x) => x.sc > 0)
+          .sort((a, b) => b.sc - a.sc)
+          .slice(0, 5)
+          .map((x) => x.item)
+        return { idx, name: row.name, candidates: scored }
+      })
+
+      // ── Вызов ИИ ────────────────────────────────────────────────────────
+      let matchMap = {}
+      try {
+        setAiProgress(`Сопоставляю ${specRows.length} строк с каталогом...`)
+
+        const prompt =
+          `Сопоставь строки технической спецификации с позициями прайс-листа.\n` +
+          `Учитывай сокращения, опечатки, синонимы и разные формулировки одного и того же.\n\n` +
+          `СТРОКИ СПЕЦИФИКАЦИИ И КАНДИДАТЫ ИЗ ПРАЙС-ЛИСТА:\n` +
+          specWithCandidates
+            .map(({ idx, name, candidates }) =>
+              `[${idx}] "${name}"\n` + (
+                candidates.length
+                  ? candidates.map((c, i) => `  ${i + 1}. id="${c.id}" | "${c.name}"${c.unit ? ` (${c.unit})` : ''}`).join('\n')
+                  : '  (кандидатов нет)'
+              )
+            )
+            .join('\n\n') +
+          `\n\nВерни ТОЛЬКО JSON-массив без пояснений:\n` +
+          `[{"idx":0,"id":"<id кандидата или null если не найдено>"},{"idx":1,"id":"<id или null>"},...]\n`
+
+        const result   = await callAI(prompt)
+        const jsonPart = result.match(/\[[\s\S]*\]/)
+        if (jsonPart) {
+          JSON.parse(jsonPart[0]).forEach(({ idx, id }) => { matchMap[idx] = id || null })
+        }
+      } catch (aiErr) {
+        // ИИ недоступен — всё уйдёт в «не найдено»
+        console.warn('AI matching failed:', aiErr)
+      }
+
+      // ── Применить результаты ─────────────────────────────────────────────
+      let matched = 0, notFound = 0
+
+      const newLines = specRows.map((row, idx) => {
+        const itemId = Object.prototype.hasOwnProperty.call(matchMap, idx) ? matchMap[idx] : undefined
+        const found  = itemId ? cat.find((c) => c.id === itemId) : null
+
+        if (found) {
+          matched++
+          const p  = found.price     || row.price    || 0
+          const pv = found.price_vat || row.priceVat || Math.round(p * 1.16 * 100) / 100
+          return {
+            _key:          Date.now() + Math.random(),
+            price_item_id: found.id,
+            name:          found.name,
+            unit:          found.unit || row.unit,
+            qty:           row.qty,
+            price:         p,
+            price_vat:     pv,
+            sum:           row.qty * p,
+            sum_vat:       row.qty * pv,
+            manual:        false,
+            source:        'catalog',
+          }
+        }
+
+        notFound++
+        const p  = row.price    || 0
+        const pv = row.priceVat || (p ? Math.round(p * 1.16 * 100) / 100 : 0)
+        return {
+          _key:          Date.now() + Math.random(),
+          price_item_id: null,
+          name:          row.name,
+          unit:          row.unit,
+          qty:           row.qty,
+          price:         p  || null,
+          price_vat:     pv || null,
+          sum:           row.qty * p,
+          sum_vat:       row.qty * pv,
+          manual:        true,
+          source:        'ai_not_found',
+        }
+      })
+
       setLines((ls) => [...ls, ...newLines])
-      setMatchInfo(`Загружено ${newLines.length} строк: ${matched} совпало с каталогом, ${manual} — ручные позиции`)
+      setMatchInfo(
+        `Загружено ${newLines.length} строк: ${matched} сопоставлено с каталогом` +
+        (notFound > 0 ? `, ${notFound} не найдено — укажите цены вручную` : '')
+      )
     } catch (ex) {
       setError('Ошибка разбора файла: ' + ex.message)
     }
-    setImporting(false)
+
+    setAiMatching(false)
+    setAiProgress('')
     e.target.value = ''
   }
 
@@ -350,6 +419,32 @@ export default function SpecEditor() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.page, fontFamily: FONT, color: C.ink }}>
+
+      {/* ИИ-overlay */}
+      {aiMatching && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(11,17,38,0.62)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 999,
+        }}>
+          <style>{`@keyframes _ai_spin{to{transform:rotate(360deg)}}`}</style>
+          <div style={{
+            background: C.surface, borderRadius: 16, padding: '32px 40px',
+            textAlign: 'center', maxWidth: 320, width: '90%',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.28)',
+          }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%', margin: '0 auto 18px',
+              border: `3px solid ${C.actionSoft}`, borderTopColor: C.action,
+              animation: '_ai_spin 0.8s linear infinite',
+            }} />
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8, color: C.ink }}>
+              ИИ сопоставляет строки
+            </div>
+            <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6 }}>{aiProgress}</div>
+          </div>
+        </div>
+      )}
+
       <div style={{ height: 4, background: `linear-gradient(90deg, ${C.brand}, ${C.action})` }} />
 
       {/* Шапка */}
@@ -439,10 +534,10 @@ export default function SpecEditor() {
 
             <button onClick={addManual} style={btnSecondary}>+ Ручная позиция</button>
 
-            {/* Загрузка Excel */}
+            {/* Загрузка Excel + ИИ */}
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcelImport} style={{ display: 'none' }} />
-            <button onClick={() => fileRef.current?.click()} disabled={importing} style={btnSecondary}>
-              {importing ? 'Загрузка...' : 'Загрузить из Excel'}
+            <button onClick={() => fileRef.current?.click()} disabled={importing || aiMatching} style={btnSecondary}>
+              {importing ? 'Чтение...' : aiMatching ? 'ИИ работает...' : '✦ Загрузить из Excel (ИИ)'}
             </button>
           </div>
         </div>
@@ -477,6 +572,16 @@ export default function SpecEditor() {
                         )}
                         {!l.manual && (
                           <span style={{ display: 'block', fontFamily: MONO, fontSize: 10, color: C.brand, marginTop: 2 }}>из каталога</span>
+                        )}
+                        {l.source === 'ai_not_found' && (
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            fontFamily: MONO, fontSize: 10, color: C.warning,
+                            background: C.warningSoft, borderRadius: 4,
+                            padding: '1px 6px', marginTop: 3,
+                          }}>
+                            не найдено — укажите цену
+                          </span>
                         )}
                       </td>
 
