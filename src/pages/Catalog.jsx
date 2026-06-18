@@ -61,34 +61,51 @@ export default function Catalog() {
       const buf  = await file.arrayBuffer()
       const wb   = XLSX.read(buf)
       const ws   = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
 
-      if (!rows.length) { setError('Файл пустой или нечитаемый'); setImporting(false); return }
+      // Читаем как массив массивов, чтобы найти строку-заголовок
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      if (!raw.length) { setError('Файл пустой или нечитаемый'); setImporting(false); return }
 
-      // Автоопределение колонок (ищем по ключевым словам в заголовках)
-      const keys = Object.keys(rows[0])
-      const find = (...words) => keys.find((k) => words.some((w) => k.toLowerCase().includes(w))) || null
+      // Ищем строку-заголовок среди первых 10 строк
+      const HEADER_WORDS = ['наимен', 'назван', 'работ', 'name', 'описание']
+      let headerIdx = 0
+      for (let i = 0; i < Math.min(10, raw.length); i++) {
+        const row = raw[i]
+        if (row.some((cell) => HEADER_WORDS.some((w) => String(cell).toLowerCase().includes(w)))) {
+          headerIdx = i
+          break
+        }
+      }
 
-      const colCode     = find('код', 'шифр', 'артикул', 'code')
-      const colCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
-      const colName     = find('наимен', 'назван', 'работ', 'name', 'описание')
-      const colUnit     = find('ед', 'единиц', 'unit')
-      const colPrice    = find('цена без', 'цена_без', 'price_no', 'без ндс', 'цена')
-      const colPriceVat = find('с ндс', 'цена_с', 'price_vat', 'с нд')
+      const headers = raw[headerIdx].map((h) => String(h).trim())
+      const dataRows = raw.slice(headerIdx + 1)
 
-      if (!colName) { setError('Не найдена колонка с наименованием. Добавьте заголовок: «Наименование»'); setImporting(false); return }
+      const find = (...words) => {
+        const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
+        return idx >= 0 ? idx : null
+      }
 
-      const toInsert = rows
+      const iCode     = find('код', 'шифр', 'артикул', 'code')
+      const iCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
+      const iName     = find('наимен', 'назван', 'работ', 'name', 'описание')
+      const iUnit     = find('ед', 'единиц', 'unit')
+      const iPrice    = find('смет', 'цена без', 'без ндс', 'price_no')
+                     ?? find('отпуск', 'цена', 'price')
+      const iPriceVat = find('с ндс', 'price_vat', 'с нд', 'отпуск')
+
+      if (iName === null) { setError('Не найдена колонка с наименованием. Добавьте заголовок: «Наименование»'); setImporting(false); return }
+
+      const toInsert = dataRows
         .map((r) => {
-          const name = String(r[colName] || '').trim()
+          const name = String(r[iName] ?? '').trim()
           if (!name) return null
-          const priceRaw    = colPrice    ? Number(String(r[colPrice]).replace(/[^\d.]/g, ''))    || null : null
-          const priceVatRaw = colPriceVat ? Number(String(r[colPriceVat]).replace(/[^\d.]/g, '')) || null : null
+          const priceRaw    = iPrice    != null ? Number(String(r[iPrice]   ?? '').replace(/[^\d.]/g, '')) || null : null
+          const priceVatRaw = iPriceVat != null ? Number(String(r[iPriceVat]?? '').replace(/[^\d.]/g, '')) || null : null
           return {
-            code:      colCode     ? String(r[colCode] || '').trim()     || null : null,
-            category:  colCategory ? String(r[colCategory] || '').trim() || null : null,
+            code:      iCode     != null ? String(r[iCode]     ?? '').trim() || null : null,
+            category:  iCategory != null ? String(r[iCategory] ?? '').trim() || null : null,
             name,
-            unit:      colUnit     ? String(r[colUnit] || '').trim()     || null : null,
+            unit:      iUnit     != null ? String(r[iUnit]     ?? '').trim() || null : null,
             price:     priceRaw,
             price_vat: priceVatRaw ?? (priceRaw ? Math.round(priceRaw * 1.16 * 100) / 100 : null),
           }
