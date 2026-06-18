@@ -52,6 +52,10 @@ ALTER TABLE specifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE spec_lines     ENABLE ROW LEVEL SECURITY;
 
 -- Политики (разрешают всё для anon и authenticated):
+DROP POLICY IF EXISTS "allow_all" ON price_items;
+DROP POLICY IF EXISTS "allow_all" ON specifications;
+DROP POLICY IF EXISTS "allow_all" ON spec_lines;
+
 CREATE POLICY "allow_all" ON price_items    FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON specifications FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all" ON spec_lines     FOR ALL USING (true) WITH CHECK (true);
