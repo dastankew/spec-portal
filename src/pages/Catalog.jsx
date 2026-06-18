@@ -87,7 +87,7 @@ export default function Catalog() {
 
       const iCode     = find('код', 'шифр', 'артикул', 'code')
       const iCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
-      const iName     = find('наимен', 'назван', 'name', 'описание', 'позиц', 'номенклатур', 'работ')
+      const iName     = find('наимен', 'назван', 'номенклатур', 'name', 'описание')
       const iUnit     = find('ед', 'единиц', 'unit')
       const iPrice    = find('смет', 'цена без', 'без ндс', 'price_no')
                      ?? find('отпуск', 'цена', 'price')

@@ -155,29 +155,46 @@ export default function SpecEditor() {
       const buf = await file.arrayBuffer()
       const wb  = XLSX.read(buf)
       const ws  = wb.Sheets[wb.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' })
 
-      const keys      = Object.keys(rows[0] || {})
-      const find      = (...words) => keys.find((k) => words.some((w) => k.toLowerCase().includes(w))) || null
-      const colName   = find('наимен', 'назван', 'работ', 'name', 'позиция')
-      const colUnit   = find('ед', 'единиц', 'unit')
-      const colQty    = find('кол', 'объём', 'qty', 'количество', 'объем')
-      const colPrice  = find('цена без', 'без ндс', 'цена', 'price_no', 'стоимость ед')
-      const colPriceV = find('с ндс', 'цена_с', 'price_vat')
+      // Читаем как массивы и находим строку-заголовок среди первых 15 строк
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
+      const HEADER_WORDS = ['наимен', 'назван', 'name', 'описание', 'номенклатур']
+      let headerIdx = 0
+      for (let i = 0; i < Math.min(15, raw.length); i++) {
+        const row = raw[i]
+        const nonEmpty = row.filter((c) => String(c).trim()).length
+        const hasKeyword = row.some((cell) => HEADER_WORDS.some((w) => String(cell).toLowerCase().includes(w)))
+        if (nonEmpty >= 2 && hasKeyword) { headerIdx = i; break }
+      }
+      const headers = raw[headerIdx].map((h) => String(h).trim())
+      const dataRows = raw.slice(headerIdx + 1)
 
-      if (!colName) { setError('Не найдена колонка с наименованием'); setImporting(false); return }
+      const findCol = (...words) => {
+        const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
+        return idx >= 0 ? idx : null
+      }
+      const iName   = findCol('наимен', 'назван', 'name', 'описание', 'номенклатур')
+      const iUnit   = findCol('ед', 'единиц', 'unit')
+      const iQty    = findCol('кол', 'объём', 'qty', 'количество', 'объем')
+      const iPrice  = findCol('стоимость ед', 'цена без', 'без ндс', 'цена', 'price_no', 'стоим')
+      const iPriceV = findCol('с ндс', 'цена_с', 'price_vat')
+
+      if (iName === null) {
+        setError(`Не найдена колонка с наименованием. Найденные заголовки: ${headers.filter(Boolean).join(' | ')}`)
+        setImporting(false); return
+      }
 
       // Распарсить строки из Excel
-      const specRows = rows
+      const specRows = dataRows
         .map((r) => {
-          const name = String(r[colName] || '').trim()
+          const name = String(r[iName] ?? '').trim()
           if (!name) return null
           return {
             name,
-            qty:      Number(String(r[colQty]    || '').replace(/[^\d.]/g, '')) || 1,
-            price:    Number(String(r[colPrice]   || '').replace(/[^\d.]/g, '')) || null,
-            priceVat: Number(String(r[colPriceV]  || '').replace(/[^\d.]/g, '')) || null,
-            unit:     colUnit ? String(r[colUnit] || '').trim() : '',
+            qty:      Number(String(r[iQty]    ?? '').replace(/[^\d.]/g, '')) || 1,
+            price:    Number(String(r[iPrice]   ?? '').replace(/[^\d.]/g, '')) || null,
+            priceVat: Number(String(r[iPriceV]  ?? '').replace(/[^\d.]/g, '')) || null,
+            unit:     iUnit != null ? String(r[iUnit] ?? '').trim() : '',
           }
         })
         .filter(Boolean)
