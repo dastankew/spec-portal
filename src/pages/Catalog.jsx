@@ -68,8 +68,8 @@ export default function Catalog() {
 
       // Ищем строку-заголовок среди первых 15 строк:
       // строка должна содержать ≥2 непустых ячеек И хотя бы одно ключевое слово
-      const HEADER_WORDS = ['наимен', 'назван', 'name', 'описание', 'позиц', 'номенклатур']
-      let headerIdx = 0
+      const HEADER_WORDS = ['наимен', 'назван', 'name', 'описание', 'номенклатур']
+      let headerIdx = -1
       for (let i = 0; i < Math.min(15, raw.length); i++) {
         const row = raw[i]
         const nonEmpty = row.filter((c) => String(c).trim()).length
@@ -77,24 +77,52 @@ export default function Catalog() {
         if (nonEmpty >= 2 && hasKeyword) { headerIdx = i; break }
       }
 
-      const headers = raw[headerIdx].map((h) => String(h).trim())
-      const dataRows = raw.slice(headerIdx + 1)
+      let iCode, iCategory, iName, iUnit, iPrice, iPriceVat, dataRows
 
-      const find = (...words) => {
-        const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
-        return idx >= 0 ? idx : null
+      if (headerIdx >= 0) {
+        // Найдена строка заголовков — определяем колонки по словам
+        const headers = raw[headerIdx].map((h) => String(h).trim())
+        dataRows = raw.slice(headerIdx + 1)
+        const find = (...words) => {
+          const idx = headers.findIndex((h) => words.some((w) => h.toLowerCase().includes(w)))
+          return idx >= 0 ? idx : null
+        }
+        iCode     = find('код', 'шифр', 'артикул', 'code')
+        iCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
+        iName     = find('наимен', 'назван', 'номенклатур', 'name', 'описание')
+        iUnit     = find('ед', 'единиц', 'unit')
+        iPrice    = find('смет', 'цена без', 'без ндс', 'price_no') ?? find('отпуск', 'цена', 'price')
+        iPriceVat = find('с ндс', 'price_vat', 'с нд', 'отпуск')
+      } else {
+        // Заголовков нет — файл начинается сразу с данных.
+        // Определяем колонки по содержимому: самая длинная строка = наименование,
+        // код выглядит как NNN-NNN-..., числа = цены, короткие слова = ед.изм.
+        const sample = raw.slice(0, Math.min(20, raw.length)).filter(r => r.filter(c => String(c).trim()).length >= 3)
+        if (!sample.length) { setError('Не удалось определить структуру файла'); setImporting(false); return }
+        const numCols = Math.max(...sample.map(r => r.length))
+        const avgLen  = Array.from({ length: numCols }, (_, c) =>
+          sample.reduce((s, r) => s + String(r[c] || '').trim().length, 0) / sample.length
+        )
+        const isNumCol = (c) => sample.every(r => !isNaN(Number(String(r[c] || '').replace(/[^\d.]/g, ''))) && String(r[c] || '').trim() !== '')
+        const isCodeCol = (c) => sample.filter(r => /^\d{3}-\d{3}/.test(String(r[c] || ''))).length > sample.length / 2
+
+        iName     = avgLen.indexOf(Math.max(...avgLen))                          // самые длинные строки
+        iCode     = Array.from({ length: numCols }, (_, c) => c).find(isCodeCol) ?? null
+        iCategory = avgLen.reduce((best, v, c) => (c !== iName && c !== iCode && v > (avgLen[best] ?? 0) ? c : best), null)
+        iUnit     = Array.from({ length: numCols }, (_, c) => c).find(c =>
+          c !== iName && c !== iCode && c !== iCategory &&
+          sample.every(r => String(r[c] || '').trim().length <= 12)
+        ) ?? null
+        const numCols2 = Array.from({ length: numCols }, (_, c) => c).filter(c =>
+          c !== iName && c !== iCode && c !== iCategory && c !== iUnit && isNumCol(c)
+        )
+        iPrice    = numCols2[0] ?? null
+        iPriceVat = numCols2[1] ?? null
+        dataRows  = raw
       }
 
-      const iCode     = find('код', 'шифр', 'артикул', 'code')
-      const iCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
-      const iName     = find('наимен', 'назван', 'номенклатур', 'name', 'описание')
-      const iUnit     = find('ед', 'единиц', 'unit')
-      const iPrice    = find('смет', 'цена без', 'без ндс', 'price_no')
-                     ?? find('отпуск', 'цена', 'price')
-      const iPriceVat = find('с ндс', 'price_vat', 'с нд', 'отпуск')
-
       if (iName === null) {
-        setError(`Не найдена колонка с наименованием. Обнаруженные заголовки: ${headers.filter(Boolean).join(' | ')}`)
+        setError('Не удалось определить колонку с наименованием. Проверьте формат файла.')
         setImporting(false); return
       }
 
