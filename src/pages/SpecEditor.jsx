@@ -163,6 +163,42 @@ export default function SpecEditor() {
   const totalNoVat = useMemo(() => lines.reduce((s, l) => s + (Number(l.sum)     || 0), 0), [lines])
   const totalVat   = useMemo(() => lines.reduce((s, l) => s + (Number(l.sum_vat) || 0), 0), [lines])
 
+  // ── Экспорт в Excel ───────────────────────────────────────────────────────
+  const exportToExcel = () => {
+    const wb = XLSX.utils.book_new()
+    const rows = []
+
+    if (title)       rows.push([title])
+    if (description) rows.push([description])
+    rows.push([])
+    rows.push(['№', 'Наименование', 'Ед.', 'Кол-во', 'Цена без НДС', 'Цена с НДС', 'Сумма без НДС', 'Сумма с НДС'])
+
+    lines.forEach((l, i) => {
+      rows.push([
+        i + 1,
+        l.name,
+        l.unit || '',
+        Number(l.qty) || 1,
+        l.price    != null ? Number(l.price)    : '',
+        l.price_vat != null ? Number(l.price_vat) : '',
+        l.sum      != null ? Number(l.sum)      : '',
+        l.sum_vat  != null ? Number(l.sum_vat)  : '',
+      ])
+    })
+
+    rows.push([])
+    rows.push(['', '', '', '', '', '', 'Итого без НДС', totalNoVat])
+    rows.push(['', '', '', '', '', '', 'Итого с НДС 16%', totalVat])
+
+    const ws = XLSX.utils.aoa_to_sheet(rows)
+    ws['!cols'] = [
+      { wch: 4 }, { wch: 52 }, { wch: 7 }, { wch: 8 },
+      { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 16 },
+    ]
+    XLSX.utils.book_append_sheet(wb, ws, 'Спецификация')
+    XLSX.writeFile(wb, `${title || 'спецификация'}.xlsx`)
+  }
+
   // ── Импорт Excel + ИИ-сопоставление ──────────────────────────────────────
   const handleExcelImport = async (e) => {
     const file = e.target.files?.[0]
@@ -737,6 +773,7 @@ export default function SpecEditor() {
         {/* Кнопки внизу */}
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           {lines.length > 0 && <button onClick={print} style={btnGhost}>Печать / PDF</button>}
+          {lines.length > 0 && <button onClick={exportToExcel} style={btnGhost}>Скачать Excel</button>}
           <button onClick={save} disabled={saving} style={btnPrimary}>
             {saving ? 'Сохранение...' : saved ? '✓ Сохранено' : 'Сохранить спецификацию'}
           </button>
