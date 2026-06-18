@@ -66,15 +66,15 @@ export default function Catalog() {
       const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
       if (!raw.length) { setError('Файл пустой или нечитаемый'); setImporting(false); return }
 
-      // Ищем строку-заголовок среди первых 10 строк
-      const HEADER_WORDS = ['наимен', 'назван', 'работ', 'name', 'описание']
+      // Ищем строку-заголовок среди первых 15 строк:
+      // строка должна содержать ≥2 непустых ячеек И хотя бы одно ключевое слово
+      const HEADER_WORDS = ['наимен', 'назван', 'name', 'описание', 'позиц', 'номенклатур']
       let headerIdx = 0
-      for (let i = 0; i < Math.min(10, raw.length); i++) {
+      for (let i = 0; i < Math.min(15, raw.length); i++) {
         const row = raw[i]
-        if (row.some((cell) => HEADER_WORDS.some((w) => String(cell).toLowerCase().includes(w)))) {
-          headerIdx = i
-          break
-        }
+        const nonEmpty = row.filter((c) => String(c).trim()).length
+        const hasKeyword = row.some((cell) => HEADER_WORDS.some((w) => String(cell).toLowerCase().includes(w)))
+        if (nonEmpty >= 2 && hasKeyword) { headerIdx = i; break }
       }
 
       const headers = raw[headerIdx].map((h) => String(h).trim())
@@ -87,13 +87,16 @@ export default function Catalog() {
 
       const iCode     = find('код', 'шифр', 'артикул', 'code')
       const iCategory = find('раздел', 'категор', 'группа', 'section', 'cat')
-      const iName     = find('наимен', 'назван', 'работ', 'name', 'описание')
+      const iName     = find('наимен', 'назван', 'name', 'описание', 'позиц', 'номенклатур', 'работ')
       const iUnit     = find('ед', 'единиц', 'unit')
       const iPrice    = find('смет', 'цена без', 'без ндс', 'price_no')
                      ?? find('отпуск', 'цена', 'price')
       const iPriceVat = find('с ндс', 'price_vat', 'с нд', 'отпуск')
 
-      if (iName === null) { setError('Не найдена колонка с наименованием. Добавьте заголовок: «Наименование»'); setImporting(false); return }
+      if (iName === null) {
+        setError(`Не найдена колонка с наименованием. Обнаруженные заголовки: ${headers.filter(Boolean).join(' | ')}`)
+        setImporting(false); return
+      }
 
       const toInsert = dataRows
         .map((r) => {
