@@ -104,16 +104,21 @@ export default function SpecEditor() {
     setLines((ls) => {
       if (ls.some((l) => l.price_item_id === item.id)) return ls
       const qty = 1
+      const p  = item.price || 0
+      // Если price_vat равна price или не задана — считаем НДС 16%
+      const pv = (item.price_vat && item.price_vat !== item.price)
+        ? item.price_vat
+        : Math.round(p * 1.16 * 100) / 100
       return [...ls, {
         _key:          Date.now() + Math.random(),
         price_item_id: item.id,
         name:          item.name,
         unit:          item.unit || '',
         qty,
-        price:         item.price,
-        price_vat:     item.price_vat,
-        sum:           qty * (item.price || 0),
-        sum_vat:       qty * (item.price_vat || 0),
+        price:         p,
+        price_vat:     pv,
+        sum:           qty * p,
+        sum_vat:       qty * pv,
         manual:        false,
       }]
     })
@@ -305,8 +310,11 @@ export default function SpecEditor() {
 
         if (found) {
           matched++
-          const p  = found.price     || row.price    || 0
-          const pv = found.price_vat || row.priceVat || Math.round(p * 1.16 * 100) / 100
+          const p  = found.price || row.price || 0
+          // Если price_vat равна price — применяем НДС 16%
+          const pv = (found.price_vat && found.price_vat !== found.price)
+            ? found.price_vat
+            : Math.round(p * 1.16 * 100) / 100
           return {
             _key:          Date.now() + Math.random(),
             price_item_id: found.id,
