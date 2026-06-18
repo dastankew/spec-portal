@@ -95,29 +95,37 @@ export default function Catalog() {
         iPriceVat = find('с ндс', 'price_vat', 'с нд', 'отпуск')
       } else {
         // Заголовков нет — файл начинается сразу с данных.
-        // Определяем колонки по содержимому: самая длинная строка = наименование,
-        // код выглядит как NNN-NNN-..., числа = цены, короткие слова = ед.изм.
+        // Определяем колонки по содержимому.
         const sample = raw.slice(0, Math.min(20, raw.length)).filter(r => r.filter(c => String(c).trim()).length >= 3)
         if (!sample.length) { setError('Не удалось определить структуру файла'); setImporting(false); return }
         const numCols = Math.max(...sample.map(r => r.length))
-        const avgLen  = Array.from({ length: numCols }, (_, c) =>
-          sample.reduce((s, r) => s + String(r[c] || '').trim().length, 0) / sample.length
-        )
-        const isNumCol = (c) => sample.every(r => !isNaN(Number(String(r[c] || '').replace(/[^\d.]/g, ''))) && String(r[c] || '').trim() !== '')
-        const isCodeCol = (c) => sample.filter(r => /^\d{3}-\d{3}/.test(String(r[c] || ''))).length > sample.length / 2
+        const cols = Array.from({ length: numCols }, (_, c) => c)
 
-        iName     = avgLen.indexOf(Math.max(...avgLen))                          // самые длинные строки
-        iCode     = Array.from({ length: numCols }, (_, c) => c).find(isCodeCol) ?? null
-        iCategory = avgLen.reduce((best, v, c) => (c !== iName && c !== iCode && v > (avgLen[best] ?? 0) ? c : best), null)
-        iUnit     = Array.from({ length: numCols }, (_, c) => c).find(c =>
-          c !== iName && c !== iCode && c !== iCategory &&
-          sample.every(r => String(r[c] || '').trim().length <= 12)
+        // helpers
+        const cellStr  = (r, c) => String(r[c] ?? '').trim()
+        const avgLen   = (c) => sample.reduce((s, r) => s + cellStr(r, c).length, 0) / sample.length
+        // числовая колонка: все значения — положительные числа
+        const isNumCol = (c) => sample.every(r => { const v = Number(cellStr(r, c)); return cellStr(r, c) !== '' && !isNaN(v) && v > 0 })
+        // колонка с кодом-шифром вида "521-101-..."
+        const isCodeCol = (c) => sample.filter(r => /^\d{3}-\d{3}/.test(cellStr(r, c))).length >= sample.length * 0.5
+        // единица изм.: короткое слово с буквами (шт., м2, комплект...)
+        const isUnitCol = (c) => sample.every(r => { const v = cellStr(r, c); return v.length <= 15 && /[а-яёa-z²³]/i.test(v) })
+
+        iCode     = cols.find(isCodeCol) ?? null
+        iName     = cols.reduce((best, c) => avgLen(c) > avgLen(best) ? c : best, 0)  // самые длинные строки
+        iUnit     = cols.find(c => c !== iName && c !== iCode && isUnitCol(c)) ?? null
+        const avgVal = (c) => sample.reduce((s, r) => s + Number(cellStr(r, c)), 0) / sample.length
+        // числовые колонки, сортируем по убыванию среднего значения (цены > порядковых номеров)
+        const numericCols = cols
+          .filter(c => c !== iName && c !== iCode && c !== iUnit && isNumCol(c))
+          .sort((a, b) => avgVal(b) - avgVal(a))
+        iPrice    = numericCols[0] ?? null
+        iPriceVat = numericCols[1] ?? null
+        // категория: длинная нечисловая строка, не название
+        iCategory = cols.find(c =>
+          c !== iName && c !== iCode && c !== iUnit && c !== iPrice && c !== iPriceVat &&
+          avgLen(c) > 5 && !isNumCol(c)
         ) ?? null
-        const numCols2 = Array.from({ length: numCols }, (_, c) => c).filter(c =>
-          c !== iName && c !== iCode && c !== iCategory && c !== iUnit && isNumCol(c)
-        )
-        iPrice    = numCols2[0] ?? null
-        iPriceVat = numCols2[1] ?? null
         dataRows  = raw
       }
 
