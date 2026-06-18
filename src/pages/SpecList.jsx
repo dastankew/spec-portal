@@ -42,7 +42,7 @@ export default function SpecList() {
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.line}`, padding: '0 24px' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', height: 60 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ fontFamily: MONO, fontSize: 11, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase', color: C.brand }}>SPEC PORTAL</span>
+            <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 600, letterSpacing: '.12em', textTransform: 'uppercase', color: C.brand }}>SPEC PORTAL</span>
             <span style={{ color: C.lineDark }}>|</span>
             <span style={{ fontWeight: 700, fontSize: 15 }}>Спецификации</span>
           </div>
@@ -73,7 +73,7 @@ export default function SpecList() {
                     {s.description && (
                       <div style={{ color: C.muted, fontSize: 13, marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.description}</div>
                     )}
-                    <div style={{ display: 'flex', gap: 16, color: C.dim, fontSize: 12, fontFamily: MONO }}>
+                    <div style={{ display: 'flex', gap: 16, color: C.dim, fontSize: 12, fontFamily: FONT }}>
                       <span>{fmtDate(s.created_at)}</span>
                       {s.lines_count != null && <span>{s.lines_count} позиций</span>}
                     </div>

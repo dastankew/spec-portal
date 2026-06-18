@@ -624,7 +624,7 @@ export default function SpecEditor() {
                 <tbody>
                   {lines.map((l, i) => (
                     <tr key={l._key} style={{ borderTop: `1px solid ${C.line}` }}>
-                      <td style={{ ...tdStyle, textAlign: 'center', color: C.muted, fontFamily: MONO, fontSize: 12, width: 32 }}>{i + 1}</td>
+                      <td style={{ ...tdStyle, textAlign: 'center', color: C.muted, fontFamily: FONT, fontSize: 12, width: 32 }}>{i + 1}</td>
 
                       {/* Название */}
                       <td style={{ ...tdStyle, minWidth: 200 }}>
@@ -638,12 +638,12 @@ export default function SpecEditor() {
                           <span style={{ fontSize: 13.5 }}>{l.name}</span>
                         )}
                         {!l.manual && (
-                          <span style={{ display: 'block', fontFamily: MONO, fontSize: 10, color: C.brand, marginTop: 2 }}>из каталога</span>
+                          <span style={{ display: 'block', fontFamily: FONT, fontSize: 10, color: C.brand, marginTop: 2 }}>из каталога</span>
                         )}
                         {l.source === 'ai_not_found' && (
                           <span style={{
                             display: 'inline-flex', alignItems: 'center', gap: 4,
-                            fontFamily: MONO, fontSize: 10, color: C.warning,
+                            fontFamily: FONT, fontSize: 10, color: C.warning,
                             background: C.warningSoft, borderRadius: 4,
                             padding: '1px 6px', marginTop: 3,
                           }}>
@@ -681,7 +681,7 @@ export default function SpecEditor() {
                             style={{ ...inlineInput, width: 108, textAlign: 'right' }}
                           />
                         ) : (
-                          <span style={{ fontSize: 13, fontFamily: MONO }}>{money(l.price)}</span>
+                          <span style={{ fontSize: 13, fontFamily: FONT }}>{money(l.price)}</span>
                         )}
                       </td>
 
@@ -695,17 +695,17 @@ export default function SpecEditor() {
                             style={{ ...inlineInput, width: 108, textAlign: 'right' }}
                           />
                         ) : (
-                          <span style={{ fontSize: 13, fontFamily: MONO }}>{money(l.price_vat)}</span>
+                          <span style={{ fontSize: 13, fontFamily: FONT }}>{money(l.price_vat)}</span>
                         )}
                       </td>
 
                       {/* Сумма без НДС */}
-                      <td style={{ ...tdStyle, width: 120, textAlign: 'right', fontWeight: 600, fontFamily: MONO, fontSize: 13 }}>
+                      <td style={{ ...tdStyle, width: 120, textAlign: 'right', fontWeight: 600, fontFamily: FONT, fontSize: 13 }}>
                         {money(l.sum)}
                       </td>
 
                       {/* Сумма с НДС */}
-                      <td style={{ ...tdStyle, width: 120, textAlign: 'right', fontWeight: 700, color: C.action, fontFamily: MONO, fontSize: 13 }}>
+                      <td style={{ ...tdStyle, width: 120, textAlign: 'right', fontWeight: 700, color: C.action, fontFamily: FONT, fontSize: 13 }}>
                         {money(l.sum_vat)}
                       </td>
 

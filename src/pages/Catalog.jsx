@@ -191,7 +191,7 @@ export default function Catalog() {
             <button onClick={() => navigate('/')} style={btnGhost}>← Назад</button>
             <span style={{ fontWeight: 700, fontSize: 15 }}>Справочник цен</span>
             {items.length > 0 && (
-              <span style={{ fontFamily: MONO, fontSize: 11, color: C.muted }}>{items.length} позиций</span>
+              <span style={{ fontFamily: FONT, fontSize: 11, color: C.muted }}>{items.length} позиций</span>
             )}
           </div>
           <div style={{ display: 'flex', gap: 10 }}>
@@ -234,7 +234,7 @@ export default function Catalog() {
                 ].map(([col, keys, req]) => (
                   <tr key={col} style={{ borderTop: `1px solid ${C.line}` }}>
                     <td style={{ padding: '8px 12px', fontWeight: 600 }}>{col}</td>
-                    <td style={{ padding: '8px 12px', color: C.muted, fontFamily: MONO, fontSize: 12 }}>{keys}</td>
+                    <td style={{ padding: '8px 12px', color: C.muted, fontFamily: FONT, fontSize: 12 }}>{keys}</td>
                     <td style={{ padding: '8px 12px', color: req === 'Да' ? C.danger : C.dim }}>{req}</td>
                   </tr>
                 ))}
@@ -279,7 +279,7 @@ export default function Catalog() {
                     }}
                   >
                     {item.code && (
-                      <span style={{ fontFamily: MONO, fontSize: 11, color: C.muted, whiteSpace: 'nowrap', minWidth: 70 }}>{item.code}</span>
+                      <span style={{ fontFamily: FONT, fontSize: 11, color: C.muted, whiteSpace: 'nowrap', minWidth: 70 }}>{item.code}</span>
                     )}
                     <span style={{ flex: 1, fontSize: 13.5, color: C.ink }}>{item.name}</span>
                     {item.category && (
@@ -294,7 +294,7 @@ export default function Catalog() {
                         <div><span style={{ color: C.muted }}>Без НДС: </span><b>{money(item.price)}</b></div>
                         <div><span style={{ color: C.muted }}>С НДС 16%: </span><b>{money(item.price_vat)}</b></div>
                         {item.unit && <div><span style={{ color: C.muted }}>Ед. изм.: </span><b>{item.unit}</b></div>}
-                        {item.code && <div><span style={{ color: C.muted }}>Код: </span><b style={{ fontFamily: MONO }}>{item.code}</b></div>}
+                        {item.code && <div><span style={{ color: C.muted }}>Код: </span><b style={{ fontFamily: FONT }}>{item.code}</b></div>}
                       </div>
                     </div>
                   )}
