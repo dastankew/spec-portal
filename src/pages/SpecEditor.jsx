@@ -5,15 +5,13 @@ import { C, FONT, MONO, money } from '../constants.js'
 import { callAI } from '../ai.js'
 import * as XLSX from 'xlsx'
 
-// pdfjs-dist загружается динамически только при первом PDF-импорте
+// pdfjs-dist грузится с CDN только при первом PDF-импорте (не входит в npm/bundle)
 let _pdfjs = null
 async function getPdfjs() {
   if (_pdfjs) return _pdfjs
-  const [lib, { default: workerUrl }] = await Promise.all([
-    import('pdfjs-dist'),
-    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
-  ])
-  lib.GlobalWorkerOptions.workerSrc = workerUrl
+  const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174'
+  const lib = await import(/* @vite-ignore */ `${CDN}/pdf.min.mjs`)
+  lib.GlobalWorkerOptions.workerSrc = `${CDN}/pdf.worker.min.mjs`
   _pdfjs = lib
   return lib
 }
