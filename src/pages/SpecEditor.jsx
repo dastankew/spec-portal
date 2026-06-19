@@ -126,24 +126,40 @@ export default function SpecEditor() {
     setAiSearching(false)
   }
 
-  // ── Поиск по каталогу (точный + нечёткий по словам) ──────────────────────
+  // ── Поиск по каталогу (по всем полям: название, код, единица) ────────────
   const searchResults = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (q.length < 2 || !catLoaded) return []
 
-    const words = q.split(/\s+/).filter((w) => w.length > 2)
+    const parts = q.split(/\s+/).filter(Boolean)
 
     const scored = catalog.map((r) => {
-      const hay = r.name.toLowerCase()
+      const name = r.name.toLowerCase()
       const code = (r.code || '').toLowerCase()
+      const unit = (r.unit || '').toLowerCase()
       let sc = 0
-      if (hay.includes(q) || code.includes(q)) sc += 100        // точное вхождение
-      words.forEach((w) => { if (hay.includes(w)) sc += 20 })   // слово в названии
+
+      // Точное вхождение всего запроса в любое поле
+      if (name.includes(q)) sc += 100
+      if (code.includes(q)) sc += 120   // код — приоритет
+      if (unit.includes(q)) sc += 10
+
+      // Каждое слово/часть запроса ищется во всех полях
+      let matched = 0
+      parts.forEach((p) => {
+        if (name.includes(p)) { sc += 20; matched++ }
+        if (code.includes(p)) { sc += 25; matched++ }
+        if (unit.includes(p)) { sc += 5;  matched++ }
+      })
+
+      // Бонус если все части нашлись (многословный запрос)
+      if (parts.length > 1 && matched >= parts.length) sc += 40
+
       return { item: r, sc }
     }).filter((x) => x.sc > 0)
       .sort((a, b) => b.sc - a.sc)
 
-    const exact   = scored.filter((x) => x.sc >= 100).slice(0, 8).map((x) => ({ ...x.item, _analog: false }))
+    const exact   = scored.filter((x) => x.sc >= 100).slice(0, 10).map((x) => ({ ...x.item, _analog: false }))
     const analogs = scored.filter((x) => x.sc < 100 && x.sc > 0).slice(0, exact.length < 3 ? 5 : 0).map((x) => ({ ...x.item, _analog: true }))
 
     return [...exact, ...analogs]
