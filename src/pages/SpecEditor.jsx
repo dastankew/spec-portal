@@ -23,9 +23,11 @@ export default function SpecEditor() {
   // Строки спецификации
   const [lines, setLines]         = useState([])
 
-  // Каталог
+  // Каталог / базы цен
   const [catalog, setCatalog]     = useState([])
   const [catLoaded, setCatLoaded] = useState(false)
+  const [catalogs, setCatalogs]   = useState([])
+  const [catFilter, setCatFilter] = useState('') // '' = все базы
 
   // UI состояния
   const [search, setSearch]       = useState('')
@@ -65,18 +67,27 @@ export default function SpecEditor() {
     })
   }, [id, isNew])
 
-  // ── Загрузка каталога (один раз) ──────────────────────────────────────────
+  // ── Загрузка списка каталогов ─────────────────────────────────────────────
+  useEffect(() => {
+    supabase.from('catalogs').select('id, name').order('created_at')
+      .then(({ data }) => setCatalogs(data || []))
+  }, [])
+
+  // ── Загрузка каталога (сбрасывается при смене фильтра) ────────────────────
   const loadCatalog = useCallback(async () => {
     if (catLoaded) return catalog
-    const { data, error } = await supabase
-      .from('price_items')
-      .select('id, code, category, name, unit, price, price_vat')
-      .order('name')
+    let q = supabase.from('price_items').select('id, catalog_id, code, category, name, unit, price, price_vat').order('name')
+    if (catFilter) q = q.eq('catalog_id', catFilter)
+    const { data, error } = await q
     if (error) throw new Error(error.message)
     setCatalog(data || [])
     setCatLoaded(true)
     return data || []
-  }, [catLoaded, catalog])
+  }, [catLoaded, catalog, catFilter])
+
+  const switchCatFilter = (id) => {
+    setCatFilter(id); setCatalog([]); setCatLoaded(false)
+  }
 
   // ── Поиск по каталогу (точный + нечёткий по словам) ──────────────────────
   const searchResults = useMemo(() => {
@@ -696,7 +707,22 @@ export default function SpecEditor() {
 
         {/* Панель добавления */}
         <div style={{ background: C.surface, borderRadius: 12, border: `1px solid ${C.line}`, padding: '16px 20px', marginBottom: 16 }}>
-          <div style={{ fontWeight: 700, marginBottom: 12, fontSize: 14 }}>Добавить позиции</div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={{ fontWeight: 700, fontSize: 14 }}>Добавить позиции</span>
+            {catalogs.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                <span style={{ color: C.muted }}>База:</span>
+                <select
+                  value={catFilter}
+                  onChange={(e) => switchCatFilter(e.target.value)}
+                  style={{ background: C.page, border: `1px solid ${C.lineDark}`, borderRadius: 6, padding: '4px 10px', fontSize: 13, fontFamily: FONT, color: C.ink, cursor: 'pointer' }}
+                >
+                  <option value="">Все базы</option>
+                  {catalogs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
 
             {/* Поиск по каталогу */}
