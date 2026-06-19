@@ -48,6 +48,11 @@ export default function SpecEditor() {
   const [saved, setSaved]         = useState(false)
   const [matchInfo, setMatchInfo] = useState('')
 
+  // ИИ-поиск похожих
+  const [aiSearch, setAiSearch]           = useState([])
+  const [aiSearching, setAiSearching]     = useState(false)
+  const [lastAiQuery, setLastAiQuery]     = useState('')
+
   // ── Загрузка существующей спецификации ────────────────────────────────────
   useEffect(() => {
     if (isNew) return
@@ -94,7 +99,31 @@ export default function SpecEditor() {
   }, [catLoaded, catalog, catFilter])
 
   const switchCatFilter = (id) => {
-    setCatFilter(id); setCatalog([]); setCatLoaded(false)
+    setCatFilter(id); setCatalog([]); setCatLoaded(false); setAiSearch([]); setLastAiQuery('')
+  }
+
+  // ── ИИ-поиск похожих позиций ──────────────────────────────────────────────
+  const doAiSearch = async () => {
+    const q = search.trim()
+    if (!q || aiSearching || !catLoaded) return
+    setAiSearching(true); setAiSearch([]); setLastAiQuery(q)
+    try {
+      // Выборка до 300 позиций из каталога (распределённая по категориям)
+      const sample = catalog.slice().sort(() => Math.random() - 0.5).slice(0, 300)
+      const prompt =
+        `Найди в каталоге позиции, которые семантически похожи, аналогичны или могут заменить: "${q}"\n` +
+        `Учитывай синонимы, категорию, назначение и область применения.\n` +
+        `Верни ТОЛЬКО JSON-массив из ID подходящих позиций (от 1 до 6, самые релевантные первыми):\n["id1","id2",...]\n\n` +
+        `КАТАЛОГ:\n` +
+        sample.map((i) => `id="${i.id}" | "${i.name}"${i.category ? ` | ${i.category}` : ''}${i.unit ? ` | ${i.unit}` : ''}`).join('\n')
+      const result    = await callAI(prompt)
+      const jsonMatch = result.match(/\[[\s\S]*?\]/)
+      if (!jsonMatch) return
+      const ids   = JSON.parse(jsonMatch[0])
+      const found = ids.map((id) => catalog.find((c) => c.id === id)).filter(Boolean)
+      setAiSearch(found.map((i) => ({ ...i, _analog: true })))
+    } catch { /* silent */ }
+    setAiSearching(false)
   }
 
   // ── Поиск по каталогу (точный + нечёткий по словам) ──────────────────────
@@ -337,7 +366,9 @@ export default function SpecEditor() {
 
         const prompt =
           `Сопоставь строки технической спецификации с позициями прайс-листа.\n` +
-          `Учитывай сокращения, опечатки, синонимы и разные формулировки одного и того же.\n\n` +
+          `Учитывай сокращения, опечатки, синонимы и разные формулировки одного и того же.\n` +
+          `Если точного совпадения нет — выбери наиболее близкий по назначению, категории или типу аналог (например "диван" → "кресло мягкое", "монитор 24" → "монитор LCD 24 дюйма").\n` +
+          `Возвращай null только если нет даже отдалённо подходящего кандидата.\n\n` +
           `СТРОКИ СПЕЦИФИКАЦИИ И КАНДИДАТЫ ИЗ ПРАЙС-ЛИСТА:\n` +
           specWithCandidates
             .map(({ idx, name, candidates }) =>
@@ -644,6 +675,7 @@ export default function SpecEditor() {
 
   return (
     <div style={{ minHeight: '100vh', background: C.page, fontFamily: FONT, color: C.ink }}>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
 
       {/* ИИ-overlay */}
       {aiMatching && (
@@ -739,17 +771,18 @@ export default function SpecEditor() {
               <input
                 ref={searchRef}
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setAiSearch([]); setLastAiQuery('') }}
                 onFocus={onSearchFocus}
                 placeholder="Поиск по справочнику цен..."
                 style={{ ...inputStyle, width: '100%' }}
               />
-              {searchResults.length > 0 && (
+              {(searchResults.length > 0 || aiSearching || aiSearch.length > 0 || (search.trim().length >= 2 && catLoaded && lastAiQuery !== search.trim())) && (
                 <div style={{
                   position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
                   background: C.surface, border: `1px solid ${C.lineDark}`, borderRadius: 8,
                   boxShadow: '0 8px 24px rgba(0,0,0,0.12)', marginTop: 4, overflow: 'hidden',
                 }}>
+                  {/* Текстовые результаты */}
                   {searchResults.map((item) => (
                     <div
                       key={item.id}
@@ -771,6 +804,48 @@ export default function SpecEditor() {
                       </div>
                     </div>
                   ))}
+
+                  {/* Кнопка ИИ-поиска или результаты */}
+                  {search.trim().length >= 2 && catLoaded && (
+                    aiSearching ? (
+                      <div style={{ padding: '10px 14px', fontSize: 13, color: C.muted, display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ display: 'inline-block', width: 12, height: 12, borderRadius: '50%', border: `2px solid ${C.action}`, borderTopColor: 'transparent', animation: 'spin 0.8s linear infinite' }} />
+                        ИИ ищет похожее...
+                      </div>
+                    ) : aiSearch.length > 0 ? (
+                      <>
+                        <div style={{ padding: '6px 14px 4px', fontSize: 11, color: C.muted, background: C.page, textTransform: 'uppercase', letterSpacing: '.05em' }}>Похожее (ИИ)</div>
+                        {aiSearch.map((item) => (
+                          <div
+                            key={item.id}
+                            onClick={() => addFromCatalog(item)}
+                            style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: `1px solid ${C.line}`, fontSize: 13, background: C.tint }}
+                            onMouseEnter={(e) => e.currentTarget.style.background = C.actionSoft}
+                            onMouseLeave={(e) => e.currentTarget.style.background = C.tint}
+                          >
+                            <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                              {item.name}
+                              <span style={{ fontSize: 10, fontWeight: 700, color: C.brand, background: C.actionSoft, borderRadius: 4, padding: '1px 5px', whiteSpace: 'nowrap' }}>ИИ</span>
+                            </div>
+                            <div style={{ color: C.muted, fontSize: 12, marginTop: 2, display: 'flex', gap: 12 }}>
+                              {item.unit && <span>{item.unit}</span>}
+                              {item.price != null && <span style={{ color: C.success, fontWeight: 600 }}>{money(item.price)} без НДС</span>}
+                              {item.category && <span style={{ color: C.brand }}>{item.category}</span>}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    ) : lastAiQuery !== search.trim() ? (
+                      <div
+                        onClick={doAiSearch}
+                        style={{ padding: '10px 14px', cursor: 'pointer', fontSize: 13, color: C.action, display: 'flex', alignItems: 'center', gap: 6, borderTop: searchResults.length > 0 ? `1px solid ${C.line}` : 'none' }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = C.actionSoft}
+                        onMouseLeave={(e) => e.currentTarget.style.background = ''}
+                      >
+                        ✦ Найти похожее с ИИ
+                      </div>
+                    ) : null
+                  )}
                 </div>
               )}
             </div>
