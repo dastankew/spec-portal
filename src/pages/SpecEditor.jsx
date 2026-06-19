@@ -4,12 +4,16 @@ import { supabase } from '../supabase.js'
 import { C, FONT, MONO, money } from '../constants.js'
 import { callAI } from '../ai.js'
 import * as XLSX from 'xlsx'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
 
 export default function SpecEditor() {
   const navigate   = useNavigate()
   const { id }     = useParams()
   const isNew      = !id
   const fileRef    = useRef()
+  const pdfFileRef = useRef()
   const searchRef  = useRef()
 
   // Мета-поля спецификации
@@ -398,6 +402,109 @@ export default function SpecEditor() {
     e.target.value = ''
   }
 
+  // ── Импорт PDF ────────────────────────────────────────────────────────────
+  const handlePdfImport = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    setImporting(true); setError(''); setMatchInfo('')
+
+    try {
+      // Извлечь текст из PDF, сохраняя структуру строк
+      const arrayBuffer = await file.arrayBuffer()
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+
+      const textLines = []
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p)
+        const tc   = await page.getTextContent()
+        const items = tc.items.filter((it) => it.str.trim())
+        items.sort((a, b) => b.transform[5] - a.transform[5])
+
+        let bucket = [], lastY = null
+        for (const it of items) {
+          const y = it.transform[5]
+          if (lastY !== null && Math.abs(lastY - y) > 4) {
+            if (bucket.length) {
+              bucket.sort((a, b) => a.transform[4] - b.transform[4])
+              textLines.push(bucket.map((x) => x.str).join('\t'))
+            }
+            bucket = []
+          }
+          bucket.push(it)
+          lastY = y
+        }
+        if (bucket.length) {
+          bucket.sort((a, b) => a.transform[4] - b.transform[4])
+          textLines.push(bucket.map((x) => x.str).join('\t'))
+        }
+        textLines.push('')
+      }
+
+      const fullText = textLines.join('\n').trim()
+      if (!fullText) {
+        setError('PDF не содержит текста (скан). Загрузите Excel или введите вручную.')
+        setImporting(false); return
+      }
+
+      setImporting(false)
+      setAiMatching(true)
+      setAiProgress('ИИ извлекает позиции из PDF...')
+
+      const prompt =
+        'Из текста ниже (прайс-лист или спецификация) извлеки список позиций.\n' +
+        'Верни ТОЛЬКО JSON-массив без пояснений:\n' +
+        '[{"name":"Наименование","unit":"шт","qty":1,"price":1000}]\n' +
+        '- name: полное наименование (обязательно, не пустое)\n' +
+        '- unit: единица измерения или ""\n' +
+        '- qty: количество (число, по умолчанию 1)\n' +
+        '- price: цена без НДС в числе или null\n' +
+        'Игнорируй заголовки таблиц, итоговые строки, примечания.\n\n' +
+        'ТЕКСТ:\n' + fullText.slice(0, 12000)
+
+      const result    = await callAI(prompt)
+      const jsonMatch = result.match(/\[[\s\S]*\]/)
+      if (!jsonMatch) {
+        setError('ИИ не распознал структуру PDF. Попробуйте Excel.')
+        return
+      }
+
+      const items = JSON.parse(jsonMatch[0]).filter((it) => it.name?.trim())
+      if (!items.length) {
+        setError('ИИ не нашёл позиций в PDF.')
+        return
+      }
+
+      const newLines = items.map((item) => {
+        const p   = Number(item.price) || 0
+        const pv  = p ? Math.round(p * 1.16 * 100) / 100 : 0
+        const qty = Number(item.qty)  || 1
+        return {
+          _key:          Date.now() + Math.random(),
+          price_item_id: null,
+          name:          String(item.name).trim(),
+          unit:          String(item.unit || '').trim(),
+          qty,
+          price:         p  || null,
+          price_vat:     pv || null,
+          sum:           qty * p,
+          sum_vat:       qty * pv,
+          manual:        true,
+          source:        'pdf',
+        }
+      })
+
+      setLines((ls) => [...ls, ...newLines])
+      setMatchInfo(`Загружено ${newLines.length} позиций из PDF`)
+    } catch (ex) {
+      setError('Ошибка чтения PDF: ' + ex.message)
+    } finally {
+      setImporting(false)
+      setAiMatching(false)
+      setAiProgress('')
+    }
+  }
+
   // ── Сохранение ────────────────────────────────────────────────────────────
   const save = async () => {
     if (!title.trim()) { setError('Введите название спецификации'); return }
@@ -641,6 +748,12 @@ export default function SpecEditor() {
             <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" onChange={handleExcelImport} style={{ display: 'none' }} />
             <button onClick={() => fileRef.current?.click()} disabled={importing || aiMatching} style={btnSecondary}>
               {importing ? 'Чтение...' : aiMatching ? 'ИИ работает...' : '✦ Загрузить из Excel (ИИ)'}
+            </button>
+
+            {/* Загрузка PDF + ИИ */}
+            <input ref={pdfFileRef} type="file" accept=".pdf" onChange={handlePdfImport} style={{ display: 'none' }} />
+            <button onClick={() => pdfFileRef.current?.click()} disabled={importing || aiMatching} style={btnSecondary}>
+              {importing || aiMatching ? '...' : '✦ Загрузить из PDF (ИИ)'}
             </button>
           </div>
         </div>
