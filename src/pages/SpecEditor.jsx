@@ -316,12 +316,15 @@ export default function SpecEditor() {
       }
 
       // Распарсить строки из Excel
+      const normCode = (c) => String(c || '').toLowerCase().replace(/[\s\-\.]/g, '')
+
       const specRows = dataRows
         .map((r) => {
           const name = String(r[iName] ?? '').trim()
           if (!name) return null
           return {
             name,
+            code:     iCode != null ? String(r[iCode] ?? '').split('\n')[0].trim() : '',
             qty:      Number(String(r[iQty]    ?? '').replace(/[^\d.]/g, '')) || 1,
             price:    Number(String(r[iPrice]   ?? '').replace(/[^\d.]/g, '')) || null,
             priceVat: Number(String(r[iPriceV]  ?? '').replace(/[^\d.]/g, '')) || null,
@@ -336,16 +339,25 @@ export default function SpecEditor() {
       setAiMatching(true)
       setAiProgress(`Анализирую ${specRows.length} строк...`)
 
-      // ── Для каждой строки найти топ-5 кандидатов по тексту ───────────
+      // ── Для каждой строки найти топ-5 кандидатов (по коду + тексту) ──
       const norm = (s) => s.toLowerCase().replace(/[^а-яёa-z0-9]/g, ' ').replace(/\s+/g, ' ').trim()
 
       const specWithCandidates = specRows.map((row, idx) => {
-        const needle = norm(row.name)
-        const words  = needle.split(' ').filter((w) => w.length > 2)
+        const needle  = norm(row.name)
+        const words   = needle.split(' ').filter((w) => w.length > 2)
+        const rowCode = normCode(row.code)
+
         const scored = cat
           .map((item) => {
             const hay = norm(item.name)
             let sc = 0
+            // Сопоставление по коду (высший приоритет)
+            if (rowCode && item.code) {
+              const catCode = normCode(item.code)
+              if (rowCode === catCode) sc += 500                          // точное совпадение кода
+              else if (rowCode.length >= 8 && catCode.startsWith(rowCode.slice(0, 8))) sc += 80
+            }
+            // Сопоставление по названию
             if (hay === needle) sc += 100
             if (hay.includes(needle.slice(0, 18))) sc += 60
             if (needle.includes(hay.slice(0, 18))) sc += 50
@@ -355,37 +367,48 @@ export default function SpecEditor() {
           .filter((x) => x.sc > 0)
           .sort((a, b) => b.sc - a.sc)
           .slice(0, 5)
-          .map((x) => x.item)
-        return { idx, name: row.name, candidates: scored }
+
+        // Если код точно совпал (sc >= 500) — берём сразу, без ИИ
+        const autoMatch = scored[0]?.sc >= 500 ? scored[0].item : null
+        return { idx, name: row.name, code: row.code, autoMatch, candidates: scored.map((x) => x.item) }
       })
 
-      // ── Вызов ИИ ────────────────────────────────────────────────────────
+      // ── Вызов ИИ только для строк без точного совпадения кода ──────────
       let matchMap = {}
+      const needsAI = specWithCandidates.filter((x) => !x.autoMatch)
+
+      // Автоматически заполняем matchMap для точных совпадений
+      specWithCandidates.forEach(({ idx, autoMatch }) => {
+        if (autoMatch) matchMap[idx] = autoMatch.id
+      })
+
       try {
-        setAiProgress(`Сопоставляю ${specRows.length} строк с каталогом...`)
+        if (needsAI.length > 0) {
+          setAiProgress(`Сопоставляю ${needsAI.length} строк с каталогом...`)
 
-        const prompt =
-          `Сопоставь строки технической спецификации с позициями прайс-листа.\n` +
-          `Учитывай сокращения, опечатки, синонимы и разные формулировки одного и того же.\n` +
-          `Если точного совпадения нет — выбери наиболее близкий по назначению, категории или типу аналог (например "диван" → "кресло мягкое", "монитор 24" → "монитор LCD 24 дюйма").\n` +
-          `Возвращай null только если нет даже отдалённо подходящего кандидата.\n\n` +
-          `СТРОКИ СПЕЦИФИКАЦИИ И КАНДИДАТЫ ИЗ ПРАЙС-ЛИСТА:\n` +
-          specWithCandidates
-            .map(({ idx, name, candidates }) =>
-              `[${idx}] "${name}"\n` + (
-                candidates.length
-                  ? candidates.map((c, i) => `  ${i + 1}. id="${c.id}" | "${c.name}"${c.unit ? ` (${c.unit})` : ''}`).join('\n')
-                  : '  (кандидатов нет)'
+          const prompt =
+            `Сопоставь строки технической спецификации с позициями прайс-листа.\n` +
+            `Учитывай сокращения, опечатки, синонимы и разные формулировки одного и того же.\n` +
+            `Если точного совпадения нет — выбери наиболее близкий по назначению, категории или типу аналог.\n` +
+            `Возвращай null только если нет даже отдалённо подходящего кандидата.\n\n` +
+            `СТРОКИ СПЕЦИФИКАЦИИ И КАНДИДАТЫ ИЗ ПРАЙС-ЛИСТА:\n` +
+            needsAI
+              .map(({ idx, name, code, candidates }) =>
+                `[${idx}]${code ? ` код:${code}` : ''} "${name}"\n` + (
+                  candidates.length
+                    ? candidates.map((c, i) => `  ${i + 1}. id="${c.id}" | "${c.name}"${c.code ? ` код:${c.code}` : ''}${c.unit ? ` (${c.unit})` : ''}`).join('\n')
+                    : '  (кандидатов нет)'
+                )
               )
-            )
-            .join('\n\n') +
-          `\n\nВерни ТОЛЬКО JSON-массив без пояснений:\n` +
-          `[{"idx":0,"id":"<id кандидата или null если не найдено>"},{"idx":1,"id":"<id или null>"},...]\n`
+              .join('\n\n') +
+            `\n\nВерни ТОЛЬКО JSON-массив без пояснений:\n` +
+            `[{"idx":0,"id":"<id кандидата или null>"},{"idx":1,"id":"<id или null>"},...]\n`
 
-        const result   = await callAI(prompt)
-        const jsonPart = result.match(/\[[\s\S]*\]/)
-        if (jsonPart) {
-          JSON.parse(jsonPart[0]).forEach(({ idx, id }) => { matchMap[idx] = id || null })
+          const result   = await callAI(prompt)
+          const jsonPart = result.match(/\[[\s\S]*\]/)
+          if (jsonPart) {
+            JSON.parse(jsonPart[0]).forEach(({ idx, id }) => { matchMap[idx] = id || null })
+          }
         }
       } catch (aiErr) {
         setMatchInfo(`⚠️ ИИ-сопоставление не сработало (${aiErr.message}). Все строки добавлены без сопоставления — проверьте VITE_ANTHROPIC_KEY в настройках Vercel.`)
