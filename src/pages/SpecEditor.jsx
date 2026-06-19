@@ -4,9 +4,19 @@ import { supabase } from '../supabase.js'
 import { C, FONT, MONO, money } from '../constants.js'
 import { callAI } from '../ai.js'
 import * as XLSX from 'xlsx'
-import * as pdfjsLib from 'pdfjs-dist'
-import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl
+
+// pdfjs-dist загружается динамически только при первом PDF-импорте
+let _pdfjs = null
+async function getPdfjs() {
+  if (_pdfjs) return _pdfjs
+  const [lib, { default: workerUrl }] = await Promise.all([
+    import('pdfjs-dist'),
+    import('pdfjs-dist/build/pdf.worker.min.mjs?url'),
+  ])
+  lib.GlobalWorkerOptions.workerSrc = workerUrl
+  _pdfjs = lib
+  return lib
+}
 
 export default function SpecEditor() {
   const navigate   = useNavigate()
@@ -423,7 +433,8 @@ export default function SpecEditor() {
     try {
       // Извлечь текст из PDF, сохраняя структуру строк
       const arrayBuffer = await file.arrayBuffer()
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+      const pdfjs = await getPdfjs()
+      const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
 
       const textLines = []
       for (let p = 1; p <= pdf.numPages; p++) {
