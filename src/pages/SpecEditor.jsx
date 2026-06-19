@@ -290,7 +290,7 @@ export default function SpecEditor() {
         if (nonEmpty >= 2 && hasKeyword) { headerIdx = i; break }
       }
 
-      let iName, iUnit, iQty, iPrice, iPriceV, dataRows
+      let iName, iCode, iUnit, iQty, iPrice, iPriceV, dataRows
 
       if (headerIdx >= 0) {
         const headers = raw[headerIdx].map((h) => String(h).trim())
@@ -300,6 +300,7 @@ export default function SpecEditor() {
           return idx >= 0 ? idx : null
         }
         iName   = findCol('наимен', 'назван', 'name', 'описание', 'номенклатур')
+        iCode   = findCol('код', 'артикул', 'шифр', 'code')
         iUnit   = findCol('ед', 'единиц', 'unit')
         iQty    = findCol('кол', 'объём', 'qty', 'количество', 'объем')
         iPrice  = findCol('стоимость ед', 'цена без', 'без ндс', 'цена', 'price_no', 'стоим')
@@ -316,13 +317,13 @@ export default function SpecEditor() {
         const isNumCol  = (c) => sample.every(r => { const v = Number(cellStr(r, c)); return cellStr(r, c) !== '' && !isNaN(v) && v > 0 })
         const isCodeCol = (c) => sample.filter(r => /^\d{3}-\d{3}/.test(cellStr(r, c))).length >= sample.length * 0.5
         const isUnitCol = (c) => sample.every(r => { const v = cellStr(r, c); return v.length <= 15 && /[а-яёa-z²³]/i.test(v) })
-        const iCode     = cols.find(isCodeCol) ?? null
+        iCode           = cols.find(isCodeCol) ?? null
         iName           = cols.reduce((best, c) => avgLen(c) > avgLen(best) ? c : best, 0)
         iUnit           = cols.find(c => c !== iName && c !== iCode && isUnitCol(c)) ?? null
         const numCols2  = cols.filter(c => c !== iName && c !== iCode && c !== iUnit && isNumCol(c)).sort((a, b) => avgVal(b) - avgVal(a))
         iPrice          = numCols2[0] ?? null
-        iPriceV         = null  // в КП без заголовков вторая числовая = цена с НДС, но нет qty
-        iQty            = null  // кол-во не всегда есть
+        iPriceV         = null
+        iQty            = null
         dataRows        = raw
       }
 
